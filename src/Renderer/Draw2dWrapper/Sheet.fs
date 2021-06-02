@@ -826,7 +826,45 @@ let update (msg : Msg) (model : Model): Model*Cmd<Msg> =
             wireCmd (BusWire.CopyWires model.SelectedWires)
         ]
     | KeyPress CtrlV ->
-        let newSymbolModel, pastedCompIds = Symbol.pasteSymbols model.Wire.Symbol model.LastMousePos // Symbol has Copied Symbols stored
+        let copiedSyms = 
+            mapValues model.Wire.Symbol.CopiedSymbols
+            |> Array.toList
+
+        let copiedOutputPorts = 
+            copiedSyms
+            |> List.collect (fun sym -> sym.Compo.OutputPorts)
+            |> List.map (fun port -> OutputPortId port.Id, port)
+            |> Map.ofList
+
+        let copiedLabelInputPorts =
+            copiedSyms
+            |> List.collect (fun sym -> 
+                match sym.Compo.Type with
+                | IOLabel -> [InputPortId sym.Compo.InputPorts.[0].Id,sym.Compo.Label]
+                | _ -> [])
+            |> Map.ofList
+
+        let listSymbols = List.map snd (Map.toList model.Wire.Symbol.Symbols) 
+
+        let drivenLabsWithNewNumbers =
+            model.Wire.WX 
+            |> mapValues
+            |> Array.collect (fun wire ->
+                match Map.tryFind wire.OutputPort copiedOutputPorts with
+                | Some _ -> 
+                    match Map.tryFind wire.InputPort copiedLabelInputPorts with
+                    | Some lab -> [|lab|]
+                    | None -> [||]
+                | None -> [||])
+            |> Array.distinct
+            |> Array.map (fun lab -> lab, Symbol.ioLabelGenNumber lab listSymbols)
+
+        let newSymbolModel, pastedCompIds = 
+            Symbol.pasteSymbols 
+                drivenLabsWithNewNumbers
+                model.Wire.Symbol 
+                model.LastMousePos // Symbol has Copied Symbols stored
+
         let newBusWireModel, pastedConnIds = BusWire.pasteWires { model.Wire with Symbol = newSymbolModel } pastedCompIds
         
         { model with Wire = newBusWireModel
